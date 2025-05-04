@@ -1,12 +1,39 @@
+type Category {
+  id: Int
+  menuItems: [MenuItem!]
+  title: String
+}
+
 """
 A date-time string at UTC, such as 2007-12-03T10:15:30Z, compliant with the `date-time` format outlined in section 5.6 of the RFC 3339 profile of the ISO 8601 standard for representation of dates and times using the Gregorian calendar.
 """
 scalar DateTime
 
+input MappingInput {
+  description: String!
+  functionCode: String!
+}
+
+input MappingStatusInput {
+  id: Int!
+  status: String!
+}
+
+type MenuItem {
+  category: Category
+  id: Int
+  price: Float
+  title: String
+}
+
 type Mutation {
   createDraft(authorEmail: String!, data: PostCreateInput!): Post
   deletePost(id: Int!): Post
+  evaluateMapping(data: MappingStatusInput!): ProposedMapping
   incrementPostViewCount(id: Int!): Post
+  proposeMapping(data: MappingInput!): ProposedMapping
+  resetData: Boolean
+  seedT1Data(data: [T1CreateInput!]!): [T1!]
   signupUser(data: UserCreateInput!): User
   togglePublishPost(id: Int!): Post
 }
@@ -31,16 +58,42 @@ input PostOrderByUpdatedAtInput {
   updatedAt: SortOrder!
 }
 
+type ProposedMapping {
+  createdAt: DateTime
+  description: String
+  functionCode: String
+  id: Int
+  status: String
+}
+
 type Query {
+  allCategories: [Category!]
+  allMappings: [ProposedMapping!]
+  allMenuItems: [MenuItem!]
+  allT1Entries: [T1!]
   allUsers: [User!]
   draftsByUser(userUniqueInput: UserUniqueInput!): [Post!]
   feed(orderBy: PostOrderByUpdatedAtInput, searchString: String, skip: Int, take: Int): [Post!]
+  mappingById(id: Int!): ProposedMapping
   postById(id: Int!): Post
 }
 
 enum SortOrder {
   asc
   desc
+}
+
+type T1 {
+  category: String
+  id: Int
+  name: String
+  price: Float
+}
+
+input T1CreateInput {
+  category: String!
+  name: String!
+  price: Float!
 }
 
 type User {

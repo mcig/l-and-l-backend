@@ -30,3 +30,35 @@ model Post {
   author    User?    @relation(fields: [authorId], references: [id])
   authorId  Int?
 }
+
+// Old Menu System
+model T1 {
+  id       Int    @id @default(autoincrement())
+  name     String
+  price    Float
+  category String
+}
+
+// New Menu System
+model Category {
+  id        Int        @id @default(autoincrement())
+  title     String     @unique
+  menuItems MenuItem[]
+}
+
+model MenuItem {
+  id         Int      @id @default(autoincrement())
+  title      String
+  price      Float
+  category   Category @relation(fields: [categoryId], references: [id])
+  categoryId Int
+}
+
+// Mapping Storage
+model ProposedMapping {
+  id           Int      @id @default(autoincrement())
+  description  String
+  functionCode String
+  status       String // pending, accepted, rejected
+  createdAt    DateTime @default(now())
+}
