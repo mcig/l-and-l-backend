@@ -1,7 +1,5 @@
 import { builder } from '../builder'
-import './user'
-import './post'
-import './menu' // Add this import
+import './angluin' // Keep only Angluin's method schema
 import { writeFileSync } from 'fs'
 import { resolve } from 'path'
 import { printSchema } from 'graphql'

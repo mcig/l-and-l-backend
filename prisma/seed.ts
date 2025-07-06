@@ -3,55 +3,8 @@ import { PrismaClient, Prisma } from '../prisma/generated/prisma/client'
 
 const prisma = new PrismaClient().$extends(withAccelerate())
 
-const userData: Prisma.UserCreateInput[] = [
-  {
-    name: 'Alice',
-    email: 'alice@prisma.io',
-    posts: {
-      create: [
-        {
-          title: 'Join the Prisma Discord',
-          content: 'https://pris.ly/discord',
-          published: true,
-        },
-      ],
-    },
-  },
-  {
-    name: 'Nilu',
-    email: 'nilu@prisma.io',
-    posts: {
-      create: [
-        {
-          title: 'Follow Prisma on Twitter',
-          content: 'https://www.twitter.com/prisma',
-          published: true,
-          viewCount: 42,
-        },
-      ],
-    },
-  },
-  {
-    name: 'Mahmoud',
-    email: 'mahmoud@prisma.io',
-    posts: {
-      create: [
-        {
-          title: 'Ask a question about Prisma on GitHub',
-          content: 'https://www.github.com/prisma/prisma/discussions',
-          published: true,
-          viewCount: 128,
-        },
-        {
-          title: 'Prisma on YouTube',
-          content: 'https://pris.ly/youtube',
-        },
-      ],
-    },
-  },
-]
-
-const menuItemsData: Prisma.T1CreateManyInput[] = [
+// Sample source data for the demo
+const sourceDataItems: Prisma.SourceDataCreateManyInput[] = [
   { name: 'Margherita Pizza', price: 9.99, category: 'Pizza' },
   { name: 'BBQ Chicken Pizza', price: 11.99, category: 'Pizza' },
   { name: 'Pepperoni Pizza', price: 10.99, category: 'Pizza' },
@@ -63,64 +16,274 @@ const menuItemsData: Prisma.T1CreateManyInput[] = [
   { name: 'Tiramisu', price: 5.5, category: 'Dessert' },
   { name: 'Espresso Coffee', price: 2.5, category: 'Drinks' },
   { name: 'Fresh Orange Juice', price: 3.0, category: 'Drinks' },
-]
-
-const sampleMappings: Prisma.ProposedMappingCreateManyInput[] = [
-  {
-    description: 'Extract item name without category prefix',
-    functionCode: `
-    const nameParts = entry.name.split(' ');
-    const category = entry.category;
-    // For some items like "BBQ Chicken Pizza", keep more context
-    let title = entry.name;
-    if (entry.name.endsWith(category)) {
-      title = entry.name.substring(0, entry.name.length - category.length - 1);
-    }
-    return {
-      title: title,
-      price: entry.price,
-      category: entry.category
-    };`,
-    status: 'pending',
-  },
-  {
-    description: 'Capitalize category names',
-    functionCode: `
-    return {
-      title: entry.name,
-      price: entry.price,
-      category: entry.category.toUpperCase()
-    };`,
-    status: 'rejected',
-  },
+  { name: 'Hawaiian Pizza', price: 12.99, category: 'Pizza' },
+  { name: 'Veggie Supreme Pizza', price: 11.5, category: 'Pizza' },
+  { name: 'Cobb Salad', price: 8.99, category: 'Salad' },
+  { name: 'Pasta Bolognese', price: 11.0, category: 'Pasta' },
+  { name: 'Cheesecake', price: 6.5, category: 'Dessert' },
+  { name: 'Cappuccino', price: 3.5, category: 'Drinks' },
 ]
 
 async function main() {
   console.log(`Start seeding ...`)
-  // Seed users and posts as before
-  for (const u of userData) {
-    const user = await prisma.user.create({
-      data: u,
+
+  // Clear existing data
+  await prisma.counterexample.deleteMany()
+  await prisma.example.deleteMany()
+  await prisma.hypothesis.deleteMany()
+  await prisma.learningSession.deleteMany()
+  await prisma.sourceData.deleteMany()
+
+  // Seed source data
+  await prisma.sourceData.createMany({
+    data: sourceDataItems,
+  })
+  console.log(`Created ${sourceDataItems.length} source data items`)
+
+  // Create multiple sample learning sessions
+  const sessions = [
+    {
+      name: 'Menu Item Name Transformation',
+      description:
+        'Learn to transform menu item names by removing category suffixes',
+      status: 'active' as const,
+    },
+    {
+      name: 'Price Format Standardization',
+      description: 'Standardize price formats across different menu systems',
+      status: 'active' as const,
+    },
+    {
+      name: 'Category Mapping',
+      description:
+        'Map categories between different menu classification systems',
+      status: 'completed' as const,
+    },
+  ]
+
+  for (const sessionData of sessions) {
+    const learningSession = await prisma.learningSession.create({
+      data: sessionData,
     })
-    console.log(`Created user with id: ${user.id}`)
+
+    // Add examples based on session type
+    if (sessionData.name === 'Menu Item Name Transformation') {
+      const examples = [
+        {
+          sourceData: JSON.stringify({
+            name: 'Margherita Pizza',
+            price: 9.99,
+            category: 'Pizza',
+          }),
+          targetData: JSON.stringify({
+            title: 'Margherita',
+            price: 9.99,
+            category: 'Pizza',
+          }),
+          type: 'positive' as const,
+        },
+        {
+          sourceData: JSON.stringify({
+            name: 'BBQ Chicken Pizza',
+            price: 11.99,
+            category: 'Pizza',
+          }),
+          targetData: JSON.stringify({
+            title: 'BBQ Chicken',
+            price: 11.99,
+            category: 'Pizza',
+          }),
+          type: 'positive' as const,
+        },
+        {
+          sourceData: JSON.stringify({
+            name: 'Caesar Salad',
+            price: 7.5,
+            category: 'Salad',
+          }),
+          targetData: JSON.stringify({
+            title: 'Caesar Salad',
+            price: 7.5,
+            category: 'Salad',
+          }),
+          type: 'positive' as const,
+        },
+        {
+          sourceData: JSON.stringify({
+            name: 'Spaghetti Carbonara',
+            price: 10.5,
+            category: 'Pasta',
+          }),
+          targetData: JSON.stringify({
+            title: 'Spaghetti Carbonara',
+            price: 10.5,
+            category: 'Pasta',
+          }),
+          type: 'positive' as const,
+        },
+        {
+          sourceData: JSON.stringify({
+            name: 'Chocolate Cake',
+            price: 6.0,
+            category: 'Dessert',
+          }),
+          targetData: JSON.stringify({
+            title: 'Chocolate Cake',
+            price: 6.0,
+            category: 'Dessert',
+          }),
+          type: 'positive' as const,
+        },
+        {
+          sourceData: JSON.stringify({
+            name: 'Hawaiian Pizza',
+            price: 12.99,
+            category: 'Pizza',
+          }),
+          targetData: JSON.stringify({
+            title: 'Hawaiian',
+            price: 12.99,
+            category: 'Pizza',
+          }),
+          type: 'positive' as const,
+        },
+      ]
+
+      for (const example of examples) {
+        await prisma.example.create({
+          data: {
+            sessionId: learningSession.id,
+            ...example,
+          },
+        })
+      }
+
+      // Create a pre-generated hypothesis
+      await prisma.hypothesis.create({
+        data: {
+          sessionId: learningSession.id,
+          functionCode: `let title = entry.name;
+if (entry.name.endsWith(entry.category) && entry.name !== entry.category) {
+  title = entry.name.substring(0, entry.name.length - entry.category.length - 1);
+}
+return { title, price: entry.price, category: entry.category };`,
+          description: 'Remove category suffix from item names when present',
+          status: 'active',
+          confidence: 0.85,
+        },
+      })
+    }
+
+    if (sessionData.name === 'Price Format Standardization') {
+      const examples = [
+        {
+          sourceData: JSON.stringify({
+            name: 'Margherita Pizza',
+            price: 9.99,
+            currency: 'USD',
+          }),
+          targetData: JSON.stringify({
+            name: 'Margherita Pizza',
+            price: 999,
+            currency: 'cents',
+          }),
+          type: 'positive' as const,
+        },
+        {
+          sourceData: JSON.stringify({
+            name: 'BBQ Chicken Pizza',
+            price: 11.99,
+            currency: 'USD',
+          }),
+          targetData: JSON.stringify({
+            name: 'BBQ Chicken Pizza',
+            price: 1199,
+            currency: 'cents',
+          }),
+          type: 'positive' as const,
+        },
+      ]
+
+      for (const example of examples) {
+        await prisma.example.create({
+          data: {
+            sessionId: learningSession.id,
+            ...example,
+          },
+        })
+      }
+    }
+
+    if (sessionData.name === 'Category Mapping') {
+      const examples = [
+        {
+          sourceData: JSON.stringify({
+            name: 'Margherita Pizza',
+            category: 'Pizza',
+          }),
+          targetData: JSON.stringify({
+            name: 'Margherita Pizza',
+            category: 'Main Course',
+          }),
+          type: 'positive' as const,
+        },
+        {
+          sourceData: JSON.stringify({
+            name: 'Caesar Salad',
+            category: 'Salad',
+          }),
+          targetData: JSON.stringify({
+            name: 'Caesar Salad',
+            category: 'Appetizer',
+          }),
+          type: 'positive' as const,
+        },
+        {
+          sourceData: JSON.stringify({
+            name: 'Chocolate Cake',
+            category: 'Dessert',
+          }),
+          targetData: JSON.stringify({
+            name: 'Chocolate Cake',
+            category: 'Sweet',
+          }),
+          type: 'positive' as const,
+        },
+      ]
+
+      for (const example of examples) {
+        await prisma.example.create({
+          data: {
+            sessionId: learningSession.id,
+            ...example,
+          },
+        })
+      }
+
+      // Create a completed hypothesis
+      await prisma.hypothesis.create({
+        data: {
+          sessionId: learningSession.id,
+          functionCode: `const categoryMap = {
+  'Pizza': 'Main Course',
+  'Salad': 'Appetizer',
+  'Pasta': 'Main Course',
+  'Dessert': 'Sweet',
+  'Drinks': 'Beverage'
+};
+return {
+  name: entry.name,
+  category: categoryMap[entry.category] || entry.category
+};`,
+          description: 'Map categories to standardized classification',
+          status: 'completed',
+          confidence: 0.95,
+        },
+      })
+    }
+
+    console.log(`Created session: ${sessionData.name}`)
   }
-
-  // Seed menu items
-  await prisma.menuItem.deleteMany()
-  await prisma.category.deleteMany()
-  await prisma.t1.deleteMany()
-  await prisma.proposedMapping.deleteMany()
-
-  await prisma.t1.createMany({
-    data: menuItemsData,
-  })
-  console.log(`Created ${menuItemsData.length} menu items in T1`)
-
-  // Seed sample mappings
-  await prisma.proposedMapping.createMany({
-    data: sampleMappings,
-  })
-  console.log(`Created ${sampleMappings.length} sample mappings`)
 
   console.log(`Seeding finished.`)
 }

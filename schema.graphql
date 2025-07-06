@@ -1,7 +1,10 @@
-type Category {
+type Counterexample {
+  createdAt: DateTime
+  errorMessage: String
+  hypothesis: Hypothesis
+  hypothesisId: Int
   id: Int
-  menuItems: [MenuItem!]
-  title: String
+  sourceData: String
 }
 
 """
@@ -9,107 +12,85 @@ A date-time string at UTC, such as 2007-12-03T10:15:30Z, compliant with the `dat
 """
 scalar DateTime
 
-input MappingInput {
-  description: String!
-  functionCode: String!
-}
-
-input MappingStatusInput {
-  id: Int!
-  status: String!
-}
-
-type MenuItem {
-  category: Category
+type Example {
+  createdAt: DateTime
+  hypothesis: Hypothesis
+  hypothesisId: Int
   id: Int
-  price: Float
-  title: String
+  session: LearningSession
+  sessionId: Int
+  sourceData: String
+  targetData: String
+  type: String
+}
+
+input ExampleInput {
+  sessionId: Int!
+  sourceData: String!
+  targetData: String!
+  type: String!
+}
+
+type Hypothesis {
+  confidence: Float
+  counterexamples: [Counterexample!]
+  createdAt: DateTime
+  description: String
+  examples: [Example!]
+  functionCode: String
+  id: Int
+  session: LearningSession
+  sessionId: Int
+  status: String
+  updatedAt: DateTime
+}
+
+type LearningSession {
+  createdAt: DateTime
+  description: String
+  examples: [Example!]
+  hypotheses: [Hypothesis!]
+  id: Int
+  name: String
+  status: String
+  updatedAt: DateTime
+}
+
+input LearningSessionInput {
+  description: String
+  name: String!
 }
 
 type Mutation {
-  createDraft(authorEmail: String!, data: PostCreateInput!): Post
-  deletePost(id: Int!): Post
-  evaluateMapping(data: MappingStatusInput!): ProposedMapping
-  incrementPostViewCount(id: Int!): Post
-  proposeMapping(data: MappingInput!): ProposedMapping
-  resetData: Boolean
-  seedT1Data(data: [T1CreateInput!]!): [T1!]
-  signupUser(data: UserCreateInput!): User
-  togglePublishPost(id: Int!): Post
-}
-
-type Post {
-  author: User
-  content: String
-  createdAt: DateTime
-  id: Int
-  published: Boolean
-  title: String
-  updatedAt: DateTime
-  viewCount: Int
-}
-
-input PostCreateInput {
-  content: String
-  title: String!
-}
-
-input PostOrderByUpdatedAtInput {
-  updatedAt: SortOrder!
-}
-
-type ProposedMapping {
-  createdAt: DateTime
-  description: String
-  functionCode: String
-  id: Int
-  status: String
+  addExample(data: ExampleInput!): Example
+  createLearningSession(data: LearningSessionInput!): LearningSession
+  generateHypothesis(sessionId: Int!): String
+  seedSourceData(data: [SourceDataInput!]!): [SourceData!]
+  testHypothesis(hypothesisId: Int!): String
 }
 
 type Query {
-  allCategories: [Category!]
-  allMappings: [ProposedMapping!]
-  allMenuItems: [MenuItem!]
-  allT1Entries: [T1!]
-  allUsers: [User!]
-  draftsByUser(userUniqueInput: UserUniqueInput!): [Post!]
-  feed(orderBy: PostOrderByUpdatedAtInput, searchString: String, skip: Int, take: Int): [Post!]
-  mappingById(id: Int!): ProposedMapping
-  postById(id: Int!): Post
+  achievements(sessionId: Int!): String
+  allLearningSessions: [LearningSession!]
+  allSourceData: [SourceData!]
+  examplesBySession(sessionId: Int!): [Example!]
+  funFacts: String
+  globalStats: String
+  hypothesesBySession(sessionId: Int!): [Hypothesis!]
+  hypothesisById(id: Int!): Hypothesis
+  learningSessionById(id: Int!): LearningSession
+  sessionStats(sessionId: Int!): String
 }
 
-enum SortOrder {
-  asc
-  desc
-}
-
-type T1 {
+type SourceData {
   category: String
   id: Int
   name: String
   price: Float
 }
 
-input T1CreateInput {
+input SourceDataInput {
   category: String!
   name: String!
   price: Float!
-}
-
-type User {
-  email: String
-  id: Int
-  name: String
-  posts: [Post!]
-}
-
-input UserCreateInput {
-  email: String!
-  name: String
-  posts: [PostCreateInput!]
-}
-
-input UserUniqueInput {
-  email: String
-  id: Int
 }
