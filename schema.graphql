@@ -52,6 +52,7 @@ type LearningSession {
   hypotheses: [Hypothesis!]
   id: Int
   name: String
+  oracleQueries: [OracleQuery!]
   status: String
   updatedAt: DateTime
 }
@@ -63,10 +64,34 @@ input LearningSessionInput {
 
 type Mutation {
   addExample(data: ExampleInput!): Example
+  answerOracleQuery(queryId: Int!, response: String!): String
   createLearningSession(data: LearningSessionInput!): LearningSession
   generateHypothesis(sessionId: Int!): String
+  pendingOracleQueries(sessionId: Int!): [OracleQuery!]
   seedSourceData(data: [SourceDataInput!]!): [SourceData!]
   testHypothesis(hypothesisId: Int!): String
+}
+
+type OracleQuery {
+  createdAt: DateTime
+  id: Int
+  queryData: String
+  queryType: String
+  response: String
+  session: LearningSession
+  sessionId: Int
+  status: String
+}
+
+input OracleQueryInput {
+  queryData: String!
+  queryType: String!
+  sessionId: Int!
+}
+
+input OracleResponseInput {
+  queryId: Int!
+  response: String!
 }
 
 type Query {

@@ -22,14 +22,15 @@ model SourceData {
 
 // Angluin's Method Implementation
 model LearningSession {
-  id          Int          @id @default(autoincrement())
-  name        String
-  description String?
-  status      String // active, completed, paused
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  hypotheses  Hypothesis[]
-  examples    Example[]
+  id            Int           @id @default(autoincrement())
+  name          String
+  description   String?
+  status        String // active, completed, paused
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  hypotheses    Hypothesis[]
+  examples      Example[]
+  oracleQueries OracleQuery[]
 }
 
 model Hypothesis {
@@ -65,4 +66,16 @@ model Counterexample {
   sourceData   String // JSON string of source data that caused failure
   errorMessage String // Description of why the hypothesis failed
   createdAt    DateTime   @default(now())
+}
+
+// Oracle queries for Angluin's L* algorithm
+model OracleQuery {
+  id        Int             @id @default(autoincrement())
+  sessionId Int
+  session   LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  queryType String // 'membership' or 'equivalence'
+  queryData String // The query data (string for membership, hypothesis for equivalence)
+  response  String? // Oracle's response
+  status    String // 'pending', 'answered', 'counterexample'
+  createdAt DateTime        @default(now())
 }
