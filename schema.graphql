@@ -1,56 +1,32 @@
-type Counterexample {
-  createdAt: DateTime
-  errorMessage: String
-  hypothesis: Hypothesis
-  hypothesisId: Int
-  id: Int
-  sourceData: String
-}
-
 """
 A date-time string at UTC, such as 2007-12-03T10:15:30Z, compliant with the `date-time` format outlined in section 5.6 of the RFC 3339 profile of the ISO 8601 standard for representation of dates and times using the Gregorian calendar.
 """
 scalar DateTime
 
-type Example {
+type Item {
+  category: String
   createdAt: DateTime
-  hypothesis: Hypothesis
-  hypothesisId: Int
+  id: Int
+  name: String
+}
+
+type LearnedDFA {
+  acceptStates: String
+  alphabet: String
+  createdAt: DateTime
   id: Int
   session: LearningSession
   sessionId: Int
-  sourceData: String
-  targetData: String
-  type: String
-}
-
-input ExampleInput {
-  sessionId: Int!
-  sourceData: String!
-  targetData: String!
-  type: String!
-}
-
-type Hypothesis {
-  confidence: Float
-  counterexamples: [Counterexample!]
-  createdAt: DateTime
-  description: String
-  examples: [Example!]
-  functionCode: String
-  id: Int
-  session: LearningSession
-  sessionId: Int
-  status: String
-  updatedAt: DateTime
+  startState: String
+  states: String
+  transitions: String
 }
 
 type LearningSession {
   createdAt: DateTime
   description: String
-  examples: [Example!]
-  hypotheses: [Hypothesis!]
   id: Int
+  learnedDFA: LearnedDFA
   name: String
   oracleQueries: [OracleQuery!]
   status: String
@@ -63,13 +39,11 @@ input LearningSessionInput {
 }
 
 type Mutation {
-  addExample(data: ExampleInput!): Example
-  answerOracleQuery(queryId: Int!, response: String!): String
+  addItem(name: String!): Item
+  answerOracleQuery(queryId: Int!, response: String!): OracleQuery
   createLearningSession(data: LearningSessionInput!): LearningSession
-  generateHypothesis(sessionId: Int!): String
-  pendingOracleQueries(sessionId: Int!): [OracleQuery!]
-  seedSourceData(data: [SourceDataInput!]!): [SourceData!]
-  testHypothesis(hypothesisId: Int!): String
+  runAngluinAlgorithm(sessionId: Int!): String
+  updateItemCategory(category: String!, id: Int!): Item
 }
 
 type OracleQuery {
@@ -83,39 +57,16 @@ type OracleQuery {
   status: String
 }
 
-input OracleQueryInput {
-  queryData: String!
-  queryType: String!
-  sessionId: Int!
-}
-
 input OracleResponseInput {
   queryId: Int!
   response: String!
 }
 
 type Query {
-  achievements(sessionId: Int!): String
+  allItems: [Item!]
   allLearningSessions: [LearningSession!]
-  allSourceData: [SourceData!]
-  examplesBySession(sessionId: Int!): [Example!]
-  funFacts: String
-  globalStats: String
-  hypothesesBySession(sessionId: Int!): [Hypothesis!]
-  hypothesisById(id: Int!): Hypothesis
+  currentDFA(sessionId: Int!): LearnedDFA
+  learningMetrics(sessionId: Int!): String
   learningSessionById(id: Int!): LearningSession
-  sessionStats(sessionId: Int!): String
-}
-
-type SourceData {
-  category: String
-  id: Int
-  name: String
-  price: Float
-}
-
-input SourceDataInput {
-  category: String!
-  name: String!
-  price: Float!
+  pendingOracleQueries(sessionId: Int!): [OracleQuery!]
 }

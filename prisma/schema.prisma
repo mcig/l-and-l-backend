@@ -12,60 +12,24 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Simple source data for the demo
-model SourceData {
-  id       Int    @id @default(autoincrement())
-  name     String
-  price    Float
-  category String
+// Items to be categorized (e.g., pizzas, drinks, etc.)
+model Item {
+  id        Int      @id @default(autoincrement())
+  name      String
+  category  String? // Learned category
+  createdAt DateTime @default(now())
 }
 
-// Angluin's Method Implementation
+// Angluin's L* Algorithm - Learning Session
 model LearningSession {
   id            Int           @id @default(autoincrement())
-  name          String
-  description   String?
-  status        String // active, completed, paused
+  name          String // e.g., "Food Categorization"
+  description   String? // e.g., "Learn to categorize food items"
+  status        String // 'active', 'completed'
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
-  hypotheses    Hypothesis[]
-  examples      Example[]
   oracleQueries OracleQuery[]
-}
-
-model Hypothesis {
-  id              Int              @id @default(autoincrement())
-  sessionId       Int
-  session         LearningSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  functionCode    String
-  description     String
-  confidence      Float            @default(0.0)
-  status          String // active, refined, rejected
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  examples        Example[]
-  counterexamples Counterexample[]
-}
-
-model Example {
-  id           Int             @id @default(autoincrement())
-  sessionId    Int
-  session      LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  hypothesisId Int?
-  hypothesis   Hypothesis?     @relation(fields: [hypothesisId], references: [id])
-  sourceData   String // JSON string of source data
-  targetData   String // JSON string of expected target data
-  type         String // positive, negative, counterexample
-  createdAt    DateTime        @default(now())
-}
-
-model Counterexample {
-  id           Int        @id @default(autoincrement())
-  hypothesisId Int
-  hypothesis   Hypothesis @relation(fields: [hypothesisId], references: [id], onDelete: Cascade)
-  sourceData   String // JSON string of source data that caused failure
-  errorMessage String // Description of why the hypothesis failed
-  createdAt    DateTime   @default(now())
+  learnedDFA    LearnedDFA?
 }
 
 // Oracle queries for Angluin's L* algorithm
@@ -74,8 +38,21 @@ model OracleQuery {
   sessionId Int
   session   LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   queryType String // 'membership' or 'equivalence'
-  queryData String // The query data (string for membership, hypothesis for equivalence)
-  response  String? // Oracle's response
-  status    String // 'pending', 'answered', 'counterexample'
+  queryData String // The query string or hypothesis
+  response  String? // Oracle's response (yes/no for membership, counterexample for equivalence)
+  status    String // 'pending', 'answered'
   createdAt DateTime        @default(now())
+}
+
+// Learned Deterministic Finite Automaton
+model LearnedDFA {
+  id           Int             @id @default(autoincrement())
+  sessionId    Int             @unique
+  session      LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  states       String // JSON array of states
+  alphabet     String // JSON array of symbols
+  transitions  String // JSON object of transitions
+  startState   String
+  acceptStates String // JSON array of accepting states
+  createdAt    DateTime        @default(now())
 }
