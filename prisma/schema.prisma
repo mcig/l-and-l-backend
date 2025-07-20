@@ -14,10 +14,11 @@ datasource db {
 
 // Items to be categorized (e.g., pizzas, drinks, etc.)
 model Item {
-  id        Int      @id @default(autoincrement())
-  name      String
-  category  String? // Learned category
-  createdAt DateTime @default(now())
+  id             Int      @id @default(autoincrement())
+  name           String
+  category       String? // Learned category (for Angluin's algorithm)
+  actualCategory String? // True category (for validation/fallback)
+  createdAt      DateTime @default(now())
 }
 
 // Angluin's L* Algorithm - Learning Session

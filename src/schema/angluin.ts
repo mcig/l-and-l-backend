@@ -85,6 +85,7 @@ class AngluinLStar {
   private maxEquivalenceQueries: number = 3 // Limit equivalence queries
   private membershipQueryCount: number = 0
   private equivalenceQueryCount: number = 0
+  private useDatabaseCategories: boolean = true // Use actual categories for accuracy
   private learningMetrics: {
     totalQueries: number
     correctPredictions: number
@@ -105,14 +106,72 @@ class AngluinLStar {
     this.targetCategory = targetCategory || this.getRandomCategory()
   }
 
+  // Get the target category for a session (from database or generate new)
+  async getTargetCategoryForSession(): Promise<string> {
+    // Check if we already have a target category stored for this session
+    const existingQueries = await prisma.oracleQuery.findMany({
+      where: {
+        sessionId: this.sessionId,
+        queryType: 'membership',
+      },
+      take: 1,
+    })
+
+    if (existingQueries.length > 0) {
+      try {
+        const queryData = JSON.parse(existingQueries[0].queryData)
+        return queryData.category
+      } catch (error) {
+        console.error('Error parsing existing query data:', error)
+      }
+    }
+
+    // If no existing queries, use the current target category
+    return this.targetCategory
+  }
+
   // Get a random category to learn
   private getRandomCategory(): string {
-    const categories = ['pizza', 'salad', 'drink']
+    const categories = [
+      'pizza',
+      'salad',
+      'drink',
+      'appetizer',
+      'main',
+      'dessert',
+    ]
     return categories[Math.floor(Math.random() * categories.length)]
+  }
+
+  // Get examples for the current target category
+  private getCategoryExamples(): any {
+    const examples = {
+      pizza:
+        'Margherita Pizza, Pepperoni Pizza, BBQ Chicken Pizza, Hawaiian Pizza, Supreme Pizza, Veggie Pizza, Meat Lovers Pizza, Buffalo Chicken Pizza',
+      salad:
+        'Caesar Salad, Greek Salad, Cobb Salad, Garden Salad, Spinach Salad, Nicoise Salad, Waldorf Salad, Caprese Salad',
+      drink:
+        'Coke, Water, Coffee, Tea, Orange Juice, Lemonade, Milk, Beer, Wine, Smoothie',
+      appetizer:
+        'Garlic Bread, Chicken Wings, Mozzarella Sticks, Onion Rings, French Fries, Breadsticks, Nachos, Bruschetta',
+      main: 'Grilled Chicken, Beef Burger, Fish Tacos, Pasta Carbonara, Steak, Salmon, Shrimp Scampi, Beef Tacos',
+      dessert:
+        'Chocolate Cake, Ice Cream, Cheesecake, Apple Pie, Tiramisu, Brownie, Chocolate Chip Cookie, Creme Brulee',
+      other: 'Items from other categories that are not in the target category',
+      note: "We are learning to categorize food items using Angluin's L* algorithm. The method constructs strings by combining words.",
+    }
+
+    return {
+      [this.targetCategory]:
+        examples[this.targetCategory as keyof typeof examples],
+      ...examples,
+    }
   }
 
   // Initialize the algorithm state from existing queries
   async initializeFromExistingQueries(): Promise<void> {
+    console.log('=== Initializing from existing queries ===')
+
     // Get all answered queries for this session
     const answeredQueries = await prisma.oracleQuery.findMany({
       where: {
@@ -121,21 +180,73 @@ class AngluinLStar {
       },
     })
 
+    console.log('Found answered queries:', answeredQueries.length)
+    console.log(
+      'All answered queries:',
+      answeredQueries.map((q) => ({
+        id: q.id,
+        type: q.queryType,
+        data: q.queryData,
+        response: q.response,
+      })),
+    )
+
+    // Clear existing state
+    this.S.clear()
+    this.E.clear()
+    this.observationTable.clear()
+
     // Rebuild the observation table from answered queries
     for (const query of answeredQueries) {
       if (query.queryType === 'membership') {
-        const queryData = JSON.parse(query.queryData)
-        const queryString = queryData.query
-        const response = query.response === 'true'
+        try {
+          const queryData = JSON.parse(query.queryData)
+          const queryString = queryData.query
+          // Accept multiple formats of "true" responses
+          const response =
+            (typeof query.response === 'string' &&
+              ['true', 'True', 'TRUE', '1', 'yes', 'Yes', 'YES'].includes(
+                query.response,
+              )) ||
+            (typeof query.response === 'boolean' && query.response === true) ||
+            (typeof query.response === 'number' && query.response === 1)
+              ? true
+              : false
 
-        // Add the query string to both S and E sets
-        this.S.add(queryString)
-        this.E.add(queryString)
+          // Debug log: print query string, raw response, and interpreted value
+          console.log(
+            `Query: "${queryString}", Raw response: ${query.response}, Interpreted: ${response}`,
+          )
 
-        // Add to observation table - use the query string as both state and experiment
-        this.setObservationTableEntry(queryString, queryString, response)
+          // Add the query string to both S and E sets
+          this.S.add(queryString)
+          this.E.add(queryString)
+
+          // Add to observation table - use the query string as both state and experiment
+          this.setObservationTableEntry(queryString, queryString, response)
+        } catch (error) {
+          console.error('Error processing query:', error)
+          console.error('Query data:', query.queryData)
+        }
       }
     }
+
+    // Force populate alphabet with all items
+    const items = await prisma.item.findMany()
+    for (const item of items) {
+      this.addToAlphabet(item.name)
+    }
+
+    console.log('Final S set:', Array.from(this.S))
+    console.log('Final E set:', Array.from(this.E))
+    console.log('Final observation table:', this.observationTable)
+    console.log('S set size after initialization:', this.S.size)
+    console.log('E set size after initialization:', this.E.size)
+    console.log(
+      'Observation table size after initialization:',
+      this.observationTable.size,
+    )
+    console.log('=========================================')
   }
 
   // Add a string to the alphabet
@@ -145,18 +256,52 @@ class AngluinLStar {
 
   // Membership query - ask oracle if a string is in the target language
   async membershipQuery(s: string): Promise<boolean> {
+    console.log(`=== Membership Query for "${s}" ===`)
+
     // Check if we already have this query in the database
-    const existingQuery = await prisma.oracleQuery.findFirst({
+    // We need to search for queries that contain this string in their queryData
+    const existingQueries = await prisma.oracleQuery.findMany({
       where: {
         sessionId: this.sessionId,
         queryType: 'membership',
-        queryData: s,
         status: 'answered',
       },
     })
 
+    console.log(`Found ${existingQueries.length} existing membership queries`)
+
+    // Find the query that matches our string
+    const existingQuery = existingQueries.find((query) => {
+      try {
+        const queryData = JSON.parse(query.queryData)
+        return queryData.query === s
+      } catch {
+        return false
+      }
+    })
+
     if (existingQuery) {
-      return existingQuery.response === 'true'
+      console.log(
+        `Found existing query for "${s}": response="${
+          existingQuery.response
+        }", type=${typeof existingQuery.response}`,
+      )
+
+      // More robust response parsing
+      const result =
+        (typeof existingQuery.response === 'string' &&
+          ['true', 'True', 'TRUE', '1', 'yes', 'Yes', 'YES'].includes(
+            existingQuery.response,
+          )) ||
+        (typeof existingQuery.response === 'boolean' &&
+          existingQuery.response === true) ||
+        (typeof existingQuery.response === 'number' &&
+          existingQuery.response === 1)
+          ? true
+          : false
+
+      console.log(`Interpreted response for "${s}": ${result}`)
+      return result
     }
 
     // Check if we've reached the limit for membership queries
@@ -193,12 +338,15 @@ class AngluinLStar {
       },
     })
 
+    console.log(`Created new membership query for "${s}" with ID ${query.id}`)
     // For now, return false - the oracle will answer this
     return false
   }
 
   // Equivalence query - ask oracle if hypothesis is equivalent to target
-  async equivalenceQuery(hypothesis: string): Promise<string | null> {
+  async equivalenceQuery(): Promise<string | null> {
+    console.log('=== Equivalence Query ===')
+
     // Check if we've reached the limit for equivalence queries
     if (this.equivalenceQueryCount >= this.maxEquivalenceQueries) {
       console.log(
@@ -209,9 +357,18 @@ class AngluinLStar {
 
     this.equivalenceQueryCount++
 
+    // Ensure observation table is up to date before generating hypothesis
+    console.log('Ensuring observation table is up to date...')
+    await this.initializeFromExistingQueries()
+    await this.buildObservationTable()
+
+    // Generate current hypothesis
+    const currentHypothesis = await this.generateHypothesis()
+    console.log('Current hypothesis for equivalence query:', currentHypothesis)
+
     // Create equivalence query with helpful context
     const queryData = {
-      hypothesis: JSON.parse(hypothesis),
+      hypothesis: currentHypothesis,
       instruction:
         "Review the hypothesis above. If it correctly represents the target language, respond with 'correct'. Otherwise, provide a counterexample string that the hypothesis categorizes incorrectly.",
       examples: {
@@ -236,6 +393,7 @@ class AngluinLStar {
       },
     })
 
+    console.log(`Created equivalence query with ID ${query.id}`)
     // For now, return null - the oracle will provide counterexample if needed
     return null
   }
@@ -304,12 +462,21 @@ class AngluinLStar {
 
   // Build the observation table
   async buildObservationTable(): Promise<void> {
+    console.log('=== Building Observation Table ===')
+    console.log('Current S set:', Array.from(this.S))
+    console.log('Current E set:', Array.from(this.E))
+
     // For food categorization, we ask membership queries about each food item
     for (const foodItem of Array.from(this.E)) {
+      console.log(`Processing membership query for: ${foodItem}`)
       const result = await this.membershipQuery(foodItem)
+      console.log(`Result for ${foodItem}: ${result}`)
       // Store the result for this food item
       this.setObservationTableEntry(foodItem, foodItem, result)
     }
+
+    console.log('Final observation table:', this.observationTable)
+    console.log('========================')
   }
 
   // Debug method to print observation table
@@ -330,24 +497,64 @@ class AngluinLStar {
   }
 
   // Generate hypothesis DFA from observation table
-  generateHypothesis(): any {
+  async generateHypothesis(): Promise<any> {
     const states: string[] = []
     const transitions: Record<string, Record<string, string>> = {}
     const acceptStates: string[] = []
 
     // Create states from S (food items)
+    console.log('=== Generating Hypothesis ===')
+    console.log('S set size:', this.S.size)
+    console.log('S set contents:', Array.from(this.S))
+
+    // If S is empty but observation table has data, populate S from observation table
+    if (this.S.size === 0 && this.observationTable.size > 0) {
+      console.log(
+        'S set is empty but observation table has data, populating S from observation table...',
+      )
+      for (const state of Array.from(this.observationTable.keys())) {
+        this.S.add(state)
+        console.log(`Added ${state} to S set`)
+      }
+    }
+
     for (const s of Array.from(this.S)) {
+      console.log(`Adding state: ${s}`)
       states.push(s)
       transitions[s] = {}
     }
 
-    // Determine which food items are pizzas based on membership queries
+    console.log('States array after population:', states)
+
+    // Determine which food items are in the target category based on membership queries
+    console.log('Target category:', this.targetCategory)
+    console.log('States (S):', Array.from(this.S))
+    console.log('Experiments (E):', Array.from(this.E))
+    console.log('Observation table size:', this.observationTable.size)
+
+    // Force check database directly if observation table is empty
+    if (this.observationTable.size === 0) {
+      console.log('Observation table is empty, checking database directly...')
+      await this.forcePopulateObservationTable()
+    }
+
+    console.log('Processing each state for acceptance:')
     for (const foodItem of Array.from(this.S)) {
-      const isPizza = this.getObservationTableEntry(foodItem, foodItem)
-      if (isPizza) {
+      const isAccepted = this.getObservationTableEntry(foodItem, foodItem)
+      console.log(`  ${foodItem}: observation table entry = ${isAccepted}`)
+      if (isAccepted) {
         acceptStates.push(foodItem)
+        console.log(`  ✓ Added ${foodItem} to accept states`)
+      } else {
+        console.log(`  ✗ ${foodItem} not accepted`)
       }
     }
+
+    console.log('Final accept states:', acceptStates)
+    console.log('Final observation table:', this.observationTable)
+    console.log('Final states array:', states)
+    console.log('Final transitions:', transitions)
+    console.log('========================')
 
     // Create simple transitions (each food item transitions to itself)
     for (const s of Array.from(this.S)) {
@@ -360,6 +567,43 @@ class AngluinLStar {
       transitions,
       startState: Array.from(this.S)[0] || '',
       acceptStates,
+    }
+  }
+
+  // Force populate observation table from database
+  private async forcePopulateObservationTable(): Promise<void> {
+    console.log('Force populating observation table from database...')
+
+    const answeredQueries = await prisma.oracleQuery.findMany({
+      where: {
+        sessionId: this.sessionId,
+        queryType: 'membership',
+        status: 'answered',
+      },
+    })
+
+    console.log(`Found ${answeredQueries.length} answered membership queries`)
+
+    for (const query of answeredQueries) {
+      try {
+        const queryData = JSON.parse(query.queryData)
+        const queryString = queryData.query
+        // Accept both string and boolean true as a positive answer
+        const response =
+          (typeof query.response === 'string' && query.response === 'true') ||
+          (typeof query.response === 'boolean' && query.response === true)
+            ? true
+            : false
+
+        console.log(`Force adding: "${queryString}" -> ${response}`)
+
+        // Add to sets and observation table
+        this.S.add(queryString)
+        this.E.add(queryString)
+        this.setObservationTableEntry(queryString, queryString, response)
+      } catch (error) {
+        console.error('Error in force populate:', error)
+      }
     }
   }
 
@@ -387,12 +631,10 @@ class AngluinLStar {
     await this.buildObservationTable()
 
     // Generate hypothesis
-    const hypothesis = this.generateHypothesis()
+    const hypothesis = await this.generateHypothesis()
 
     // Test hypothesis with equivalence query
-    const counterexample = await this.equivalenceQuery(
-      JSON.stringify(hypothesis),
-    )
+    const counterexample = await this.equivalenceQuery()
 
     if (counterexample && counterexample !== 'correct') {
       // Add counterexample to S and E
@@ -409,7 +651,7 @@ class AngluinLStar {
   // Evaluate final performance and save metrics
   async evaluatePerformance(): Promise<any> {
     const items = await prisma.item.findMany()
-    const finalHypothesis = this.generateHypothesis()
+    const finalHypothesis = await this.generateHypothesis()
 
     let correctPredictions = 0
     let incorrectPredictions = 0
@@ -417,12 +659,15 @@ class AngluinLStar {
 
     // Test the hypothesis on all food items
     for (const item of items) {
-      const isPizza = item.name.toLowerCase().includes('pizza')
+      const isInTargetCategory = await this.isItemInCategory(
+        item.name,
+        this.targetCategory,
+      )
       const prediction = this.predictItem(item.name, finalHypothesis)
 
       itemsTested.push(item.name)
 
-      if (prediction === isPizza) {
+      if (prediction === isInTargetCategory) {
         correctPredictions++
       } else {
         incorrectPredictions++
@@ -445,7 +690,7 @@ class AngluinLStar {
     await prisma.learningSession.update({
       where: { id: this.sessionId },
       data: {
-        description: `Learning completed! Convergence achieved with ${this.learningMetrics.accuracy}% accuracy (${correctPredictions}/${totalItems} correct classifications)`,
+        description: `Learning completed for ${this.targetCategory} category! Convergence achieved with ${this.learningMetrics.accuracy}% accuracy (${correctPredictions}/${totalItems} correct classifications)`,
       },
     })
 
@@ -455,28 +700,104 @@ class AngluinLStar {
     }
   }
 
-  // Predict if an item is a pizza using the learned DFA
+  // Check if an item belongs to the target category
+  private async isItemInCategory(
+    itemName: string,
+    category: string,
+  ): Promise<boolean> {
+    // If using database categories, check the actual category
+    if (this.useDatabaseCategories) {
+      const item = await prisma.item.findFirst({
+        where: { name: itemName },
+      })
+      if (item && item.actualCategory) {
+        return item.actualCategory === category
+      }
+    }
+
+    // Fallback to string matching for pure Angluin's mode
+    const itemNameLower = itemName.toLowerCase()
+    switch (category) {
+      case 'pizza':
+        return itemNameLower.includes('pizza')
+      case 'salad':
+        return itemNameLower.includes('salad')
+      case 'drink':
+        return (
+          itemNameLower.includes('coke') ||
+          itemNameLower.includes('water') ||
+          itemNameLower.includes('coffee') ||
+          itemNameLower.includes('tea') ||
+          itemNameLower.includes('juice') ||
+          itemNameLower.includes('lemonade') ||
+          itemNameLower.includes('milk') ||
+          itemNameLower.includes('beer') ||
+          itemNameLower.includes('wine') ||
+          itemNameLower.includes('smoothie')
+        )
+      case 'appetizer':
+        return (
+          itemNameLower.includes('bread') ||
+          itemNameLower.includes('wings') ||
+          itemNameLower.includes('sticks') ||
+          itemNameLower.includes('rings') ||
+          itemNameLower.includes('fries') ||
+          itemNameLower.includes('nachos') ||
+          itemNameLower.includes('bruschetta')
+        )
+      case 'main':
+        return (
+          itemNameLower.includes('chicken') ||
+          itemNameLower.includes('burger') ||
+          itemNameLower.includes('tacos') ||
+          itemNameLower.includes('pasta') ||
+          itemNameLower.includes('steak') ||
+          itemNameLower.includes('salmon') ||
+          itemNameLower.includes('shrimp') ||
+          itemNameLower.includes('scampi')
+        )
+      case 'dessert':
+        return (
+          itemNameLower.includes('cake') ||
+          itemNameLower.includes('ice cream') ||
+          itemNameLower.includes('cheesecake') ||
+          itemNameLower.includes('pie') ||
+          itemNameLower.includes('tiramisu') ||
+          itemNameLower.includes('brownie') ||
+          itemNameLower.includes('cookie') ||
+          itemNameLower.includes('creme brulee')
+        )
+      default:
+        return false
+    }
+  }
+
+  // Predict if an item is in the target category using the learned DFA
   private predictItem(itemName: string, hypothesis: any): boolean {
-    // Simple prediction: if the item name contains "pizza", it's a pizza
-    // In a real implementation, this would use the DFA transitions
-    return itemName.toLowerCase().includes('pizza')
+    // Check if the item is in the accepting states of the hypothesis
+    return hypothesis.acceptStates.includes(itemName)
   }
 
   // Continue learning after answering queries
   async continueLearning(): Promise<any> {
+    console.log('=== Continue Learning ===')
+
+    // Get the correct target category for this session
+    this.targetCategory = await this.getTargetCategoryForSession()
+    console.log('Using target category:', this.targetCategory)
+
     // Initialize from existing answered queries
     await this.initializeFromExistingQueries()
 
-    // Rebuild observation table with answered queries
+    // Ensure the observation table is fully populated from the latest answers
     await this.buildObservationTable()
 
     // Generate hypothesis
-    const hypothesis = this.generateHypothesis()
+    const hypothesis = await this.generateHypothesis()
+    console.log('Generated hypothesis in continueLearning:', hypothesis)
 
     // Test hypothesis with equivalence query
-    const counterexample = await this.equivalenceQuery(
-      JSON.stringify(hypothesis),
-    )
+    const counterexample = await this.equivalenceQuery()
 
     if (counterexample && counterexample !== 'correct') {
       // Add counterexample to S and E
@@ -540,6 +861,33 @@ class AngluinLStar {
     // For now, return the pizza DFA
     return results
   }
+
+  // Public methods to access private properties
+  getS(): Set<string> {
+    return this.S
+  }
+
+  getObservationTable(): Map<string, Map<string, boolean>> {
+    return this.observationTable
+  }
+
+  // Force populate S and E from observation table
+  forcePopulateSets(): void {
+    for (const state of Array.from(this.observationTable.keys())) {
+      this.S.add(state)
+      this.E.add(state)
+    }
+  }
+
+  // Toggle between pure Angluin's mode and database-assisted mode
+  setUseDatabaseCategories(use: boolean): void {
+    this.useDatabaseCategories = use
+  }
+
+  // Get current mode
+  getUseDatabaseCategories(): boolean {
+    return this.useDatabaseCategories
+  }
 }
 
 // GraphQL Queries
@@ -548,15 +896,6 @@ builder.queryField('allItems', (t) =>
     type: ['Item'],
     resolve: async (query) => {
       return prisma.item.findMany(query)
-    },
-  }),
-)
-
-builder.queryField('allLearningSessions', (t) =>
-  t.prismaField({
-    type: ['LearningSession'],
-    resolve: async (query) => {
-      return prisma.learningSession.findMany(query)
     },
   }),
 )
@@ -576,25 +915,6 @@ builder.queryField('learningSessionById', (t) =>
   }),
 )
 
-builder.queryField('pendingOracleQueries', (t) =>
-  t.prismaField({
-    type: ['OracleQuery'],
-    args: {
-      sessionId: t.arg.int({ required: true }),
-    },
-    resolve: async (query, _parent, { sessionId }) => {
-      return prisma.oracleQuery.findMany({
-        ...query,
-        where: {
-          sessionId,
-          status: 'pending',
-        },
-        orderBy: { createdAt: 'asc' },
-      })
-    },
-  }),
-)
-
 builder.queryField('currentDFA', (t) =>
   t.prismaField({
     type: 'LearnedDFA',
@@ -607,6 +927,54 @@ builder.queryField('currentDFA', (t) =>
         where: { sessionId },
         orderBy: { createdAt: 'desc' },
       })
+    },
+  }),
+)
+
+builder.queryField('currentDFAState', (t) =>
+  t.field({
+    type: 'String',
+    args: {
+      sessionId: t.arg.int({ required: true }),
+    },
+    resolve: async (_parent, { sessionId }) => {
+      try {
+        console.log('=== Current DFA State Query ===')
+        const angluin = new AngluinLStar(sessionId)
+
+        // Use the same logic as equivalence query
+        await angluin.initializeFromExistingQueries()
+        await angluin.buildObservationTable()
+
+        // Check if S set is still empty after initialization
+        if (angluin.getS().size === 0) {
+          console.log(
+            'S set is still empty after initialization, forcing population from observation table...',
+          )
+          // Force populate S and E from observation table
+          angluin.forcePopulateSets()
+          console.log(
+            'S set after forced population:',
+            Array.from(angluin.getS()),
+          )
+        }
+
+        const hypothesis = await angluin.generateHypothesis()
+
+        console.log('Generated hypothesis for currentDFAState:', hypothesis)
+
+        return JSON.stringify({
+          states: hypothesis.states,
+          alphabet: hypothesis.alphabet,
+          transitions: hypothesis.transitions,
+          startState: hypothesis.startState,
+          acceptStates: hypothesis.acceptStates,
+          targetCategory: await angluin.getTargetCategoryForSession(),
+        })
+      } catch (error) {
+        console.error('Error getting current DFA state:', error)
+        return JSON.stringify({ error: 'Failed to get DFA state' })
+      }
     },
   }),
 )
@@ -637,6 +1005,14 @@ builder.queryField('learningMetrics', (t) =>
         (q) => q.queryType === 'equivalence',
       )
 
+      // Debug: Show all membership queries with their responses
+      const debugQueries = membershipQueries.map((q) => ({
+        id: q.id,
+        queryData: q.queryData,
+        response: q.response,
+        status: q.status,
+      }))
+
       const metrics = {
         sessionName: session.name,
         description: session.description,
@@ -644,6 +1020,7 @@ builder.queryField('learningMetrics', (t) =>
         membershipQueries: membershipQueries.length,
         equivalenceQueries: equivalenceQueries.length,
         hasLearnedDFA: !!session.learnedDFA,
+        debugQueries: debugQueries, // Add debug info
         dfaData: session.learnedDFA
           ? {
               states: JSON.parse(session.learnedDFA.states),
@@ -660,61 +1037,101 @@ builder.queryField('learningMetrics', (t) =>
 )
 
 // GraphQL Mutations
-builder.mutationField('createLearningSession', (t) =>
-  t.prismaField({
-    type: 'LearningSession',
+builder.mutationField('startLearning', (t) =>
+  t.field({
+    type: 'String',
     args: {
-      data: t.arg({ type: LearningSessionInput, required: true }),
+      sessionName: t.arg.string({ required: true }),
     },
-    resolve: async (query, _parent, { data }) => {
-      return prisma.learningSession.create({
-        ...query,
+    resolve: async (_parent, { sessionName }) => {
+      // Create a new learning session
+      const session = await prisma.learningSession.create({
         data: {
-          name: data.name,
-          description: data.description,
+          name: sessionName,
+          description: `Learning session for ${sessionName}`,
           status: 'active',
         },
+      })
+
+      // Initialize the Angluin algorithm
+      const angluin = new AngluinLStar(session.id)
+
+      // Start learning and get the first query
+      const result = await angluin.learn()
+
+      // Get the first pending query
+      const firstQuery = await prisma.oracleQuery.findFirst({
+        where: {
+          sessionId: session.id,
+          status: 'pending',
+        },
+        orderBy: { createdAt: 'asc' },
+      })
+
+      return JSON.stringify({
+        sessionId: session.id,
+        currentQuery: firstQuery
+          ? {
+              id: firstQuery.id,
+              type: firstQuery.queryType,
+              data: firstQuery.queryData,
+            }
+          : null,
+        isComplete: !firstQuery,
+        finalResult: !firstQuery ? result : null,
       })
     },
   }),
 )
 
-builder.mutationField('answerOracleQuery', (t) =>
-  t.prismaField({
-    type: 'OracleQuery',
+builder.mutationField('answerQuery', (t) =>
+  t.field({
+    type: 'String',
     args: {
-      queryId: t.arg.int({ required: true }),
+      sessionId: t.arg.int({ required: true }),
       response: t.arg.string({ required: true }),
     },
-    resolve: async (query, _parent, { queryId, response }) => {
-      // Update the query with the response
-      const updatedQuery = await prisma.oracleQuery.update({
-        ...query,
-        where: { id: queryId },
+    resolve: async (_parent, { sessionId, response }) => {
+      // Get the current pending query
+      const currentQuery = await prisma.oracleQuery.findFirst({
+        where: {
+          sessionId,
+          status: 'pending',
+        },
+        orderBy: { createdAt: 'asc' },
+      })
+
+      if (!currentQuery) {
+        return JSON.stringify({
+          error: 'No pending queries found',
+          isComplete: true,
+        })
+      }
+
+      // Answer the current query
+      await prisma.oracleQuery.update({
+        where: { id: currentQuery.id },
         data: {
           response,
           status: 'answered',
         },
       })
 
-      // Get the session ID to continue learning
-      const sessionId = updatedQuery.sessionId
-
-      // Check if there are any pending queries left
-      const pendingQueries = await prisma.oracleQuery.findMany({
+      // Check if there are more pending queries
+      const remainingQueries = await prisma.oracleQuery.findMany({
         where: {
           sessionId,
           status: 'pending',
         },
       })
 
-      // If no pending queries, continue the learning process
-      if (pendingQueries.length === 0) {
+      if (remainingQueries.length === 0) {
+        // No more queries, continue learning
         try {
           const angluin = new AngluinLStar(sessionId)
           const result = await angluin.continueLearning()
 
-          // Save the updated DFA
+          // Save the learned DFA
           if (result) {
             await prisma.learnedDFA.upsert({
               where: { sessionId },
@@ -735,39 +1152,31 @@ builder.mutationField('answerOracleQuery', (t) =>
               },
             })
           }
+
+          return JSON.stringify({
+            nextQuery: null,
+            isComplete: true,
+            finalResult: result,
+          })
         } catch (error) {
           console.error('Error continuing learning:', error)
+          return JSON.stringify({
+            error: 'Error continuing learning',
+            isComplete: true,
+          })
         }
+      } else {
+        // Get the next query
+        const nextQuery = remainingQueries[0]
+        return JSON.stringify({
+          nextQuery: {
+            id: nextQuery.id,
+            type: nextQuery.queryType,
+            data: nextQuery.queryData,
+          },
+          isComplete: false,
+        })
       }
-
-      return updatedQuery
-    },
-  }),
-)
-
-builder.mutationField('runAngluinAlgorithm', (t) =>
-  t.field({
-    type: 'String',
-    args: {
-      sessionId: t.arg.int({ required: true }),
-    },
-    resolve: async (_parent, { sessionId }) => {
-      const angluin = new AngluinLStar(sessionId)
-      const result = await angluin.learn()
-
-      // Save the learned DFA
-      await prisma.learnedDFA.create({
-        data: {
-          sessionId,
-          states: JSON.stringify(result.states),
-          alphabet: JSON.stringify(result.alphabet),
-          transitions: JSON.stringify(result.transitions),
-          startState: result.startState,
-          acceptStates: JSON.stringify(result.acceptStates),
-        },
-      })
-
-      return JSON.stringify(result)
     },
   }),
 )

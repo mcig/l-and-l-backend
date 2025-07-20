@@ -40,9 +40,8 @@ input LearningSessionInput {
 
 type Mutation {
   addItem(name: String!): Item
-  answerOracleQuery(queryId: Int!, response: String!): OracleQuery
-  createLearningSession(data: LearningSessionInput!): LearningSession
-  runAngluinAlgorithm(sessionId: Int!): String
+  answerQuery(response: String!, sessionId: Int!): String
+  startLearning(sessionName: String!): String
   updateItemCategory(category: String!, id: Int!): Item
 }
 
@@ -64,9 +63,8 @@ input OracleResponseInput {
 
 type Query {
   allItems: [Item!]
-  allLearningSessions: [LearningSession!]
   currentDFA(sessionId: Int!): LearnedDFA
+  currentDFAState(sessionId: Int!): String
   learningMetrics(sessionId: Int!): String
   learningSessionById(id: Int!): LearningSession
-  pendingOracleQueries(sessionId: Int!): [OracleQuery!]
 }
